@@ -16,12 +16,19 @@ Click the toolbar icon any time to see your stats.
 
 ## What it tracks
 
-Time accrues for the active tab's domain only when **all** of these are true:
+Time accrues for the active tab's domain when **all** of these are true:
 
 - A Chrome window is the focused/foreground app
-- You're not idle (some keyboard/mouse input within the last 60 seconds)
 - The tab is a normal `http`/`https` page (internal pages like
   `chrome://settings` are ignored)
+- Either you're not idle (keyboard/mouse input within the last 60 seconds),
+  **or** the tab is actively playing media
+
+That last point is the important one: a video or audio that is **playing**
+(the tab is audible, or the window is fullscreen) keeps counting even when you
+sit still and watch — so a 40-minute YouTube/Netflix video is counted in full.
+A **paused** tab makes no sound, so it stops counting after the idle timeout.
+This works on any site, not a fixed list.
 
 Data is grouped by **domain** (e.g. `youtube.com`), with `www.` stripped.
 
@@ -43,6 +50,11 @@ is sent anywhere. Use **Clear data** in the popup to wipe it.
 ## Notes / limits
 
 - It records the domain, not full URLs or page content.
+- Silent passive use (e.g. reading a long article without scrolling, with no
+  audio) still stops counting after 60s of no input — only playing media keeps
+  counting through idle.
+- Audio playing in a **background** tab isn't counted; only the focused,
+  active tab accrues time.
 - Tracking is per Chrome profile (the one the extension is installed in).
 - If your computer sleeps, each commit is capped so sleep time isn't counted as
   browsing time.

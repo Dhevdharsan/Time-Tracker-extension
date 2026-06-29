@@ -1,16 +1,17 @@
 // ===== Time Tracker - background service worker (MV3) =====
 //
-// Strategy: time is accrued only when ALL of these are true:
+// Time is accrued for the active tab's domain only when:
 //   1. A Chrome window is focused (Chrome is the foreground app)
-//   2. The user is not idle (input within IDLE_SECONDS)
-//   3. The active tab is an http/https page
+//   2. The active tab is an http/https page
+//   3. The user is not idle  -- OR -- the active tab is actively playing media
+//      (audible or fullscreen). This lets long videos on any site (YouTube,
+//      Netflix, embedded players, etc.) keep counting while you watch without
+//      touching the keyboard. A *paused* tab makes no sound, so it stops.
 //
-// Because MV3 service workers are not persistent, we don't keep a running
-// timer in memory. Instead we persist the "current session" (active domain +
-// start timestamp) to storage. On every relevant event we finalize the
-// previous session (commit elapsed seconds) and, if appropriate, start a new
-// one. A 1-minute alarm keeps stored data near-real-time and bounds any
-// over-count if the machine sleeps.
+// MV3 service workers aren't persistent, so we don't keep a running timer in
+// memory. We persist the current session (domain + start time) to storage,
+// finalize it on every relevant event, and a 1-minute alarm keeps stored data
+// fresh and bounds over-count if the machine sleeps.
 
 const SESSION_KEY = "currentSession"; // { domain, startTime } | null
 const DATA_KEY = "timeData";          // { "YYYY-MM-DD": { domain: seconds } }
@@ -18,8 +19,7 @@ const FLUSH_ALARM = "flush";
 const IDLE_SECONDS = 60;
 
 // A genuine continuous session is chopped into ~60s pieces by the alarm, so any
-// single finalize larger than this means the worker/machine was asleep and that
-// time should not be fully trusted. We cap each commit to avoid over-counting.
+// single commit larger than this means the worker/machine was asleep. Cap it.
 const MAX_COMMIT_SECONDS = 120;
 
 // --- simple async lock so overlapping events don't corrupt storage ---
@@ -50,10 +50,9 @@ function domainFromUrl(url) {
   }
 }
 
-async function getActiveDomain() {
+async function getActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!tab || !tab.url) return null;
-  return domainFromUrl(tab.url);
+  return tab || null;
 }
 
 async function chromeHasFocus() {
@@ -63,6 +62,35 @@ async function chromeHasFocus() {
   } catch {
     return false;
   }
+}
+
+async function isWindowFullscreen(windowId) {
+  try {
+    const w = await chrome.windows.get(windowId);
+    return w.state === "fullscreen";
+  } catch {
+    return false;
+  }
+}
+
+// Returns the domain we should be tracking right now, or null.
+async function resolveTrackingDomain() {
+  if (!(await chromeHasFocus())) return null;
+
+  const tab = await getActiveTab();
+  if (!tab || !tab.url) return null;
+
+  const domain = domainFromUrl(tab.url);
+  if (!domain) return null;
+
+  const idleState = await chrome.idle.queryState(IDLE_SECONDS);
+  if (idleState === "active") return domain; // normal interactive use
+  if (idleState === "locked") return null;   // screen locked -> never count
+
+  // idle but not locked: keep counting only if the tab is actively playing
+  if (tab.audible) return domain;
+  if (await isWindowFullscreen(tab.windowId)) return domain;
+  return null;
 }
 
 async function getState() {
@@ -94,10 +122,7 @@ async function start(domain) {
 // Commit any open session, then start a fresh one if we should be tracking.
 async function update() {
   await finalize();
-  const idleState = await chrome.idle.queryState(IDLE_SECONDS);
-  if (idleState !== "active") return;
-  if (!(await chromeHasFocus())) return;
-  const domain = await getActiveDomain();
+  const domain = await resolveTrackingDomain();
   if (domain) await start(domain);
 }
 
@@ -105,7 +130,8 @@ async function update() {
 chrome.tabs.onActivated.addListener(() => withLock(update));
 
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.url && tab.active) withLock(update);
+  // react to navigations and to play/pause (audible flips)
+  if ((info.url || info.audible !== undefined) && tab.active) withLock(update);
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
@@ -118,12 +144,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   });
 });
 
-chrome.idle.onStateChanged.addListener((state) => {
-  withLock(async () => {
-    if (state === "active") await update();
-    else await finalize();
-  });
-});
+chrome.idle.onStateChanged.addListener(() => withLock(update));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === FLUSH_ALARM) withLock(update);
