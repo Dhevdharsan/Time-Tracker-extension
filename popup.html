@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>Time Tracker</h1>
+      </header>
+
+      <div class="tabs" id="tabs">
+        <button data-period="today">Today</button>
+        <button data-period="week" class="active">Week</button>
+        <button data-period="month">Month</button>
+        <button data-period="all">All time</button>
+      </div>
+
+      <div class="summary" id="summary"></div>
+      <div class="list" id="list"></div>
+
+      <footer>
+        <span class="meta" id="meta"></span>
+        <button id="clear" class="clear">Clear data</button>
+      </footer>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
